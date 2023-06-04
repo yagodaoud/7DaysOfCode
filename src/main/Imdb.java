@@ -1,57 +1,95 @@
 package main;
 
-import java.io.BufferedReader;
-import java.io.InputStreamReader;
-import java.net.HttpURLConnection;
-import java.net.MalformedURLException;
-import java.net.ProtocolException;
-import java.net.URL;
+import java.io.PrintWriter;
+import java.net.URI;
+import java.net.http.HttpClient;
+import java.net.http.HttpRequest;
+import java.net.http.HttpResponse;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
+import java.util.stream.Collectors;
+import java.util.stream.Stream;
 
-import org.json.JSONArray;
-import org.json.JSONObject;
 
 public class Imdb {
+
+    public record Movie(String title, String url, String imDbRating, String year) {
+    }
+
     public static void main(String[] args) throws Exception {
 
-        String url = "https://imdb-api.com/API/Top250Movies/k_r2ocdyro";
 
-            URL obj = new URL(url);
+        URI uri = new URI("https://imdb-api.com/API/Top250Movies/k_r2ocdyro");
 
-            HttpURLConnection con = (HttpURLConnection) obj.openConnection();
-            con.setRequestMethod("GET");
+        HttpClient client = HttpClient.newHttpClient();
+        HttpRequest request = HttpRequest.newBuilder().uri(uri).build();
 
-            int responseCode = con.getResponseCode();
-            if (responseCode == HttpURLConnection.HTTP_OK) {
-                BufferedReader in = new BufferedReader(new InputStreamReader(con.getInputStream()));
-                String inputLine;
-                StringBuffer response = new StringBuffer();
-                while ((inputLine = in.readLine()) != null) {
-                    response.append(inputLine);
-                }
-                in.close();
+        HttpResponse<String> response = client.send(request, HttpResponse.BodyHandlers.ofString());
+        String json = response.body();
 
-                //Prints all 250 movies
-                System.out.println(response);
+        List<Movie> movies = parse(json);
 
-                JSONObject objResponse = new JSONObject(response.toString());
-                JSONArray titlesArray = objResponse.getJSONArray("titles");
-                JSONArray yearsArray = objResponse.getJSONArray("years");
-                JSONArray imagesArray = objResponse.getJSONArray("images");
-
-                List<String> titles = new ArrayList<>();
-                List<String> years = new ArrayList<>();
-                List<String> images = new ArrayList<>();
-
-                for (int i = 0; i < titlesArray.length(); i++) {
-                    titles.add(titlesArray.getString(i));
-                    years.add(yearsArray.getString(i));
-                    images.add(imagesArray.getString(i));
-
-                }
-                System.out.println("Titles: " + titles + "\nYears: " + years + "\nImages: " + images);
-            }
-        }
+        System.out.println(movies.get(0));
 
     }
+
+    private static List<Movie> parse(String json) {
+
+        String[] moviesArray = parseJsonMovies(json);
+
+        List<String> titles = parseTitles(moviesArray);
+        List<String> urlImages = parseUrlImages(moviesArray);
+        List<String> ratings = parseRatings(moviesArray);
+        List<String> years = parseYears(moviesArray);
+
+        List<Movie> movies = new ArrayList<>(titles.size());
+
+        for (int i = 0; i < titles.size(); i++) {
+            movies.add(new Movie(titles.get(i), urlImages.get(i), ratings.get(i), years.get(i)));
+        }
+        return movies;
+
+    }
+
+    private static String[] parseJsonMovies(String json) {
+        Matcher matcher = Pattern.compile(".*\\[(.*)\\].*").matcher(json);
+
+        if (!matcher.matches()) {
+            throw new IllegalArgumentException("Error");
+        }
+
+        String[] moviesArray = matcher.group(1).split("\\{");
+        moviesArray[0] = moviesArray[0].substring(1);
+        int last = moviesArray.length - 1;
+        String lastString = moviesArray[last];
+        moviesArray[last] = lastString.substring(0, lastString.length() - 1);
+        return moviesArray;
+    }
+
+    private static List<String> parseTitles(String[] moviesArray) {
+        return parseAttribute(moviesArray, 3);
+    }
+
+    private static List<String> parseUrlImages(String[] moviesArray) {
+        return parseAttribute(moviesArray, 5);
+    }
+
+    private static List<String> parseRatings(String[] moviesArray) {
+        return parseAttribute(moviesArray, 7);
+    }
+
+    private static List<String> parseYears(String[] moviesArray) {
+        return parseAttribute(moviesArray, 4);
+    }
+
+
+    private static List<String> parseAttribute(String[] jsonMovies, int pos) {
+        return Stream.of(jsonMovies)
+                .map(e -> e.split("\",\"")[pos])
+                .map(e -> e.split(":\"")[1])
+                .map(e -> e.replaceAll("\"", ""))
+                .collect(Collectors.toList());
+    }
+}
